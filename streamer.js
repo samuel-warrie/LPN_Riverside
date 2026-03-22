@@ -1,21 +1,16 @@
 require("dotenv").config();
-// const BoxSDK = require("box-node-sdk");
+
+const rawBox = require("box-node-sdk");
+const BoxSDK = rawBox.default || rawBox;
 const axios = require("axios");
 const express = require("express");
 const fs = require("fs");
-const rawBox = require("box-node-sdk");
-console.log("box-node-sdk export:", rawBox);
-console.log("type:", typeof rawBox);
-console.log("keys:", Object.keys(rawBox || {}));
 
-const BoxSDK = rawBox.default || rawBox;
-console.log("BoxSDK resolved:", BoxSDK);
 const app = express();
 app.use(express.json());
 
 const configPath = process.env.BOX_CONFIG_FILE || "config.json";
-const configFile = fs.readFileSync(configPath, "utf8");
-const config = JSON.parse(configFile);
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 
 const sdk = BoxSDK.getPreconfiguredInstance(config);
 const client = sdk.getAppAuthClient("user", process.env.BOX_USER_ID);
@@ -24,9 +19,9 @@ app.post("/transfer", async (req, res) => {
   const { riversideUrl, folderId, fileName } = req.body;
 
   if (!riversideUrl || !folderId || !fileName) {
-    return res
-      .status(400)
-      .send({ error: "Missing riversideUrl, folderId, or fileName" });
+    return res.status(400).json({
+      error: "Missing riversideUrl, folderId, or fileName",
+    });
   }
 
   try {
@@ -34,7 +29,6 @@ app.post("/transfer", async (req, res) => {
     console.log(`File: ${fileName}`);
     console.log(`Target Folder: ${folderId}`);
 
-    // 4. Authenticated Stream from Riverside
     const response = await axios({
       method: "get",
       url: riversideUrl,
@@ -42,39 +36,43 @@ app.post("/transfer", async (req, res) => {
       headers: {
         Authorization: `Bearer ${process.env.RIVERSIDE_API_KEY}`,
       },
+      maxRedirects: 5,
     });
 
-    // 5. Chunked Upload to Box
-    console.log("Streaming chunks directly to Box...");
+    const fileSizeHeader = response.headers["content-length"];
+    const fileSize = Number(fileSizeHeader);
 
-    // FIX: Box Chunked Upload returns the file object directly in 'entries'
-    const boxFile = await client.files.uploadChunked(
+    if (!Number.isFinite(fileSize) || fileSize <= 0) {
+      throw new Error(
+        "Could not determine file size from Riverside response headers",
+      );
+    }
+
+    console.log(`Riverside file size: ${fileSize} bytes`);
+
+    const uploader = await client.files.getChunkedUploader(
       folderId,
-      null,
+      fileSize,
       fileName,
       response.data,
     );
 
-    // FIX: Adjusted the path to the ID for chunked uploads
-    const newFileId = boxFile.entries[0].id;
-    console.log(`Successfully uploaded! Box File ID: ${newFileId}`);
+    const boxFile = await uploader.start();
 
-    res.status(200).send({
+    console.log("Upload complete:", boxFile);
+
+    res.status(200).json({
       status: "Success",
-      fileId: newFileId,
-      message: `Uploaded as User ${process.env.BOX_USER_ID}`,
+      file: boxFile,
     });
   } catch (error) {
     console.error("Transfer failed:", error.message);
 
-    if (error.response && error.response.data) {
-      console.error(
-        "Box Error Details:",
-        JSON.stringify(error.response.data, null, 2),
-      );
+    if (error.response?.data) {
+      console.error("API error data:", error.response.data);
     }
 
-    res.status(500).send({
+    res.status(500).json({
       error: "Transfer failed",
       details: error.message,
     });
