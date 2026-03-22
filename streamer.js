@@ -1,23 +1,24 @@
 require("dotenv").config();
-const BoxSDK = require("box-node-sdk");
+// const BoxSDK = require("box-node-sdk");
 const axios = require("axios");
 const express = require("express");
 const fs = require("fs");
-const app = express();
+const rawBox = require("box-node-sdk");
+console.log("box-node-sdk export:", rawBox);
+console.log("type:", typeof rawBox);
+console.log("keys:", Object.keys(rawBox || {}));
 
+const BoxSDK = rawBox.default || rawBox;
+console.log("BoxSDK resolved:", BoxSDK);
+const app = express();
 app.use(express.json());
 
-// 1. Load the Box Config JSON
 const configPath = process.env.BOX_CONFIG_FILE || "config.json";
-const configFile = fs.readFileSync(configPath);
+const configFile = fs.readFileSync(configPath, "utf8");
 const config = JSON.parse(configFile);
 
-// 2. Initialize Box SDK
 const sdk = BoxSDK.getPreconfiguredInstance(config);
-
-// 3. Create the As-User Client
-// (We use 'let' here to ensure it's globally accessible to the route below)
-let client = sdk.getAppAuthClient("user", process.env.BOX_USER_ID);
+const client = sdk.getAppAuthClient("user", process.env.BOX_USER_ID);
 
 app.post("/transfer", async (req, res) => {
   const { riversideUrl, folderId, fileName } = req.body;
