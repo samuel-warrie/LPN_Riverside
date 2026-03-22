@@ -7,32 +7,21 @@ const app = express();
 
 app.use(express.json());
 
-// 1. Load the Box Config JSON (Ensure this file is in your folder)
+// 1. Load the Box Config JSON
 const configPath = process.env.BOX_CONFIG_FILE || "config.json";
 const configFile = fs.readFileSync(configPath);
 const config = JSON.parse(configFile);
 
-// 2. Initialize Box SDK with JWT
-if (BoxSDK.getPreconfiguredInstance) {
-  const sdk = BoxSDK.getPreconfiguredInstance(config);
-  var client = sdk.getAppAuthClient("user", process.env.BOX_USER_ID);
-} else {
-  console.error(
-    "Critical Error: BoxSDK.getPreconfiguredInstance is missing. Reinstall the SDK.",
-  );
-}
+// 2. Initialize Box SDK
+const sdk = BoxSDK.getPreconfiguredInstance(config);
 
-/**
- * 3. AS-USER IMPERSONATION
- * Using your Account ID (38085490952) to act as your Admin account.
- * This bypasses the need to "invite" the service account to folders.
- */
-
+// 3. Create the As-User Client
+// (We use 'let' here to ensure it's globally accessible to the route below)
+let client = sdk.getAppAuthClient("user", process.env.BOX_USER_ID);
 
 app.post("/transfer", async (req, res) => {
   const { riversideUrl, folderId, fileName } = req.body;
 
-  // Basic validation
   if (!riversideUrl || !folderId || !fileName) {
     return res
       .status(400)
@@ -45,7 +34,6 @@ app.post("/transfer", async (req, res) => {
     console.log(`Target Folder: ${folderId}`);
 
     // 4. Authenticated Stream from Riverside
-    // This handles the download without hitting Make.com's memory limits
     const response = await axios({
       method: "get",
       url: riversideUrl,
@@ -55,30 +43,29 @@ app.post("/transfer", async (req, res) => {
       },
     });
 
-    /**
-     * 5. Chunked Upload to Box
-     * Essential for 1GB+ files. The SDK handles the heavy lifting
-     * of splitting the file into parts for a stable upload.
-     */
+    // 5. Chunked Upload to Box
     console.log("Streaming chunks directly to Box...");
+
+    // FIX: Box Chunked Upload returns the file object directly in 'entries'
     const boxFile = await client.files.uploadChunked(
       folderId,
-      null, // null because we are creating a NEW file
+      null,
       fileName,
       response.data,
     );
 
-    console.log(`Successfully uploaded! Box File ID: ${boxFile.entries[0].id}`);
+    // FIX: Adjusted the path to the ID for chunked uploads
+    const newFileId = boxFile.entries[0].id;
+    console.log(`Successfully uploaded! Box File ID: ${newFileId}`);
 
     res.status(200).send({
       status: "Success",
-      fileId: boxFile.entries[0].id,
+      fileId: newFileId,
       message: `Uploaded as User ${process.env.BOX_USER_ID}`,
     });
   } catch (error) {
     console.error("Transfer failed:", error.message);
 
-    // Detailed error logging for Box API issues
     if (error.response && error.response.data) {
       console.error(
         "Box Error Details:",
@@ -93,10 +80,8 @@ app.post("/transfer", async (req, res) => {
   }
 });
 
-// Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n🚀 Middle-man server is live on port ${PORT}`);
   console.log(`Impersonating Box User: ${process.env.BOX_USER_ID}`);
-  console.log(`Listening for Riverside transfers...`);
 });
