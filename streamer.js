@@ -8,7 +8,7 @@ const app = express();
 app.use(express.json());
 
 // 1. Load the Box Config JSON (Ensure this file is in your folder)
-const configPath = process.env.BOX_CONFIG_FILE || "1244329352__config.json";
+const configPath = process.env.BOX_CONFIG_FILE || "config.json";
 const configFile = fs.readFileSync(configPath);
 const config = JSON.parse(configFile);
 
