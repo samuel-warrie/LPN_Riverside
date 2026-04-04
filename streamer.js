@@ -12,16 +12,23 @@ app.use(express.json());
 // ✅ Works locally (reads config.json file) AND on Render (reads env var)
 let config;
 try {
-  if (process.env.BOX_CONFIG_JSON) {
-    // Render: read from environment variable
-    console.log("📦 Loading Box config from environment variable...");
-    config = JSON.parse(process.env.BOX_CONFIG_JSON.replace(/\\n/g, "\n"));
-  } else if (fs.existsSync("config.json")) {
-    // Local: read from config.json file
+  if (fs.existsSync("config.json")) {
     console.log("📦 Loading Box config from config.json file...");
     config = JSON.parse(fs.readFileSync("config.json", "utf8"));
   } else {
-    throw new Error("No Box config found! Set BOX_CONFIG_JSON env var or add config.json file.");
+    console.log("📦 Loading Box config from individual env vars...");
+    config = {
+      boxAppSettings: {
+        clientID: process.env.BOX_CLIENT_ID,
+        clientSecret: process.env.BOX_CLIENT_SECRET,
+        appAuth: {
+          publicKeyID: process.env.BOX_PUBLIC_KEY_ID,
+          privateKey: process.env.BOX_PRIVATE_KEY.replace(/\\n/g, "\n"),
+          passphrase: process.env.BOX_PASSPHRASE,
+        },
+      },
+      enterpriseID: process.env.BOX_ENTERPRISE_ID,
+    };
   }
 } catch (e) {
   console.error("❌ Failed to load Box config:", e.message);
