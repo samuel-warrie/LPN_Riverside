@@ -53,6 +53,13 @@ app.post("/transfer", async (req, res) => {
     });
   }
 
+  // ✅ Respond immediately so Render doesn't timeout
+  res.status(202).json({
+    status: "Transfer started",
+    message: `Transferring ${fileName} to Box folder ${folderId}`,
+  });
+
+  // ✅ Run the actual transfer in the background
   try {
     console.log(`\n--- Starting Transfer ---`);
     console.log(`File: ${fileName}`);
@@ -83,16 +90,12 @@ app.post("/transfer", async (req, res) => {
     );
 
     const boxFile = await uploader.start();
-    console.log("✅ Upload complete:", boxFile);
-
-    res.status(200).json({ status: "Success", file: boxFile });
-
+    console.log("✅ Upload complete:", boxFile.id);
   } catch (error) {
     console.error("❌ Transfer failed:", error.message);
     if (error.response?.data) {
       console.error("API error:", JSON.stringify(error.response.data));
     }
-    res.status(500).json({ error: "Transfer failed", details: error.message });
   }
 });
 
