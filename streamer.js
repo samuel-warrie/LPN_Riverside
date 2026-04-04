@@ -9,11 +9,33 @@ const fs = require("fs");
 const app = express();
 app.use(express.json());
 
-const configPath = process.env.BOX_CONFIG_FILE || "config.json";
-const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+// ✅ Works locally (reads config.json file) AND on Render (reads env var)
+let config;
+try {
+  if (process.env.BOX_CONFIG_JSON) {
+    // Render: read from environment variable
+    console.log("📦 Loading Box config from environment variable...");
+    config = JSON.parse(process.env.BOX_CONFIG_JSON.replace(/\\n/g, "\n"));
+  } else if (fs.existsSync("config.json")) {
+    // Local: read from config.json file
+    console.log("📦 Loading Box config from config.json file...");
+    config = JSON.parse(fs.readFileSync("config.json", "utf8"));
+  } else {
+    throw new Error("No Box config found! Set BOX_CONFIG_JSON env var or add config.json file.");
+  }
+} catch (e) {
+  console.error("❌ Failed to load Box config:", e.message);
+  process.exit(1);
+}
 
 const sdk = BoxSDK.getPreconfiguredInstance(config);
-const client = sdk.getAppAuthClient("user", process.env.BOX_USER_ID);
+const client = sdk.getAppAuthClient("enterprise");
+
+// ✅ Test auth on startup
+client.users
+  .get("me")
+  .then((u) => console.log("✅ Box auth working:", u.login))
+  .catch((e) => console.error("❌ Box auth failed:", e.message));
 
 app.post("/transfer", async (req, res) => {
   const { riversideUrl, folderId, fileName } = req.body;
@@ -39,16 +61,12 @@ app.post("/transfer", async (req, res) => {
       maxRedirects: 5,
     });
 
-    const fileSizeHeader = response.headers["content-length"];
-    const fileSize = Number(fileSizeHeader);
-
+    const fileSize = Number(response.headers["content-length"]);
     if (!Number.isFinite(fileSize) || fileSize <= 0) {
-      throw new Error(
-        "Could not determine file size from Riverside response headers",
-      );
+      throw new Error("Could not determine file size from Riverside headers");
     }
 
-    console.log(`Riverside file size: ${fileSize} bytes`);
+    console.log(`File size: ${fileSize} bytes`);
 
     const uploader = await client.files.getChunkedUploader(
       folderId,
@@ -58,29 +76,20 @@ app.post("/transfer", async (req, res) => {
     );
 
     const boxFile = await uploader.start();
+    console.log("✅ Upload complete:", boxFile);
 
-    console.log("Upload complete:", boxFile);
+    res.status(200).json({ status: "Success", file: boxFile });
 
-    res.status(200).json({
-      status: "Success",
-      file: boxFile,
-    });
   } catch (error) {
-    console.error("Transfer failed:", error.message);
-
+    console.error("❌ Transfer failed:", error.message);
     if (error.response?.data) {
-      console.error("API error data:", error.response.data);
+      console.error("API error:", JSON.stringify(error.response.data));
     }
-
-    res.status(500).json({
-      error: "Transfer failed",
-      details: error.message,
-    });
+    res.status(500).json({ error: "Transfer failed", details: error.message });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`\n🚀 Middle-man server is live on port ${PORT}`);
-  console.log(`Impersonating Box User: ${process.env.BOX_USER_ID}`);
+  console.log(`🚀 Server live on port ${PORT}`);
 });
